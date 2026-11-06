@@ -1,0 +1,474 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#183b35">
+  <title>Cártama | Panel meteorológico</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,500;9..144,600&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #1d2b28;
+      --muted: #64736e;
+      --paper: #f4f6f1;
+      --surface: #ffffff;
+      --line: #dce3dc;
+      --forest: #245c4b;
+      --moss: #7f9b62;
+      --coral: #c65e4b;
+      --amber: #d39a3c;
+      --blue: #517d91;
+      --mint: #e6eee6;
+      --shadow: 0 8px 26px rgba(29, 43, 40, .055);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background-color: var(--paper);
+      background-image: linear-gradient(rgba(36, 92, 75, .035) 1px, transparent 1px), linear-gradient(90deg, rgba(36, 92, 75, .035) 1px, transparent 1px);
+      background-size: 32px 32px;
+      font-family: "DM Sans", sans-serif;
+    }
+    button, input { font: inherit; }
+    button { color: inherit; }
+    .shell { max-width: 1440px; margin: 0 auto; padding: 28px clamp(16px, 3.5vw, 52px) 48px; }
+    .masthead { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; padding-bottom: 22px; border-bottom: 1px solid var(--line); }
+    .eyebrow { margin: 0 0 8px; color: var(--forest); font: 500 11px "DM Mono", monospace; letter-spacing: 0; text-transform: uppercase; }
+    h1 { margin: 0; font: 500 clamp(30px, 4vw, 46px)/1.08 "Fraunces", Georgia, serif; letter-spacing: 0; }
+    .subtitle { margin: 10px 0 0; color: var(--muted); font-size: 14px; }
+    .privacy { display: inline-flex; align-items: center; gap: 8px; padding: 8px 11px; border: 1px solid #cbd9ce; border-radius: 4px; background: #f7faf6; color: var(--forest); font: 500 11px "DM Mono", monospace; white-space: nowrap; }
+    .privacy::before { width: 7px; height: 7px; border-radius: 50%; background: #558c68; content: ""; }
+    .upload-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 16px; align-items: stretch; margin: 22px 0 20px; }
+    .drop-zone { min-height: 92px; display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 18px 22px; border: 1px dashed #9cb2a2; border-radius: 5px; background: rgba(255,255,255,.82); transition: border-color .16s ease, background .16s ease, transform .16s ease; }
+    .drop-zone.is-over { border-color: var(--forest); background: #edf5ed; transform: translateY(-1px); }
+    .drop-copy { display: flex; align-items: center; gap: 14px; min-width: 0; }
+    .upload-mark { flex: 0 0 38px; width: 38px; height: 38px; display: grid; place-items: center; border-radius: 4px; background: var(--mint); color: var(--forest); font-size: 22px; }
+    .drop-title { margin: 0; font-size: 14px; font-weight: 700; }
+    .drop-hint { margin: 4px 0 0; color: var(--muted); font-size: 12px; }
+    .file-name { max-width: 35%; overflow: hidden; color: var(--muted); font: 400 11px "DM Mono", monospace; text-overflow: ellipsis; white-space: nowrap; }
+    .button { min-height: 40px; padding: 0 15px; border: 1px solid var(--forest); border-radius: 4px; background: var(--forest); color: #fff; font-size: 13px; font-weight: 700; cursor: pointer; transition: background .16s ease, border-color .16s ease; }
+    .button:hover { border-color: #173c31; background: #173c31; }
+    .button.secondary { border-color: var(--line); background: #fff; color: var(--ink); }
+    .button.secondary:hover { border-color: #98aa9b; background: #f8faf7; }
+    .status { align-self: stretch; min-width: 180px; display: flex; align-items: center; padding: 14px 16px; border-left: 2px solid var(--amber); background: rgba(255,255,255,.72); color: var(--muted); font-size: 12px; line-height: 1.45; }
+    .status[data-state="ready"] { border-color: #568b68; color: var(--forest); }
+    .status[data-state="error"] { border-color: var(--coral); color: #873e32; }
+    .toolbar { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 16px; padding: 16px 0 17px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+    .date-controls { display: flex; flex-wrap: wrap; align-items: end; gap: 10px; }
+    .field { display: grid; gap: 5px; }
+    .field label { color: var(--muted); font: 500 10px "DM Mono", monospace; text-transform: uppercase; }
+    .field input { height: 36px; width: 148px; padding: 0 9px; border: 1px solid var(--line); border-radius: 3px; background: #fff; color: var(--ink); font-size: 12px; }
+    .presets { display: flex; flex-wrap: wrap; gap: 5px; }
+    .preset { height: 34px; padding: 0 10px; border: 1px solid transparent; border-radius: 3px; background: transparent; color: var(--muted); font-size: 12px; cursor: pointer; }
+    .preset:hover, .preset.active { border-color: #cbd9ce; background: #edf3eb; color: var(--forest); }
+    .range-label { margin: 0; color: var(--muted); font: 400 11px "DM Mono", monospace; }
+    .metrics { display: grid; grid-template-columns: repeat(4, minmax(130px, 1fr)); gap: 0; margin: 20px 0 28px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: rgba(255,255,255,.75); }
+    .metric { min-height: 82px; padding: 15px 18px; border-right: 1px solid var(--line); }
+    .metric:last-child { border-right: 0; }
+    .metric-label { margin: 0 0 8px; color: var(--muted); font: 500 10px "DM Mono", monospace; text-transform: uppercase; }
+    .metric-value { margin: 0; font: 500 23px/1 "Fraunces", Georgia, serif; }
+    .metric-value small { color: var(--muted); font: 400 12px "DM Sans", sans-serif; }
+    .section-head { display: flex; align-items: end; justify-content: space-between; gap: 16px; margin: 0 0 14px; }
+    .section-head h2 { margin: 0; font: 500 22px "Fraunces", Georgia, serif; }
+    .section-head p { margin: 0; color: var(--muted); font-size: 12px; }
+    .chart-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+    .chart-panel { min-width: 0; padding: 16px 16px 12px; border: 1px solid var(--line); border-radius: 5px; background: var(--surface); box-shadow: var(--shadow); }
+    .chart-panel.wide { grid-column: 1 / -1; }
+    .chart-head { display: flex; justify-content: space-between; align-items: start; gap: 12px; margin-bottom: 5px; }
+    .chart-head h3 { margin: 0; font-size: 14px; font-weight: 700; }
+    .chart-head p { margin: 4px 0 0; color: var(--muted); font-size: 11px; }
+    .download { flex: 0 0 auto; width: 32px; height: 30px; display: grid; place-items: center; border: 1px solid transparent; border-radius: 3px; background: transparent; color: var(--muted); cursor: pointer; }
+    .download:hover { border-color: var(--line); background: #f7f9f6; color: var(--forest); }
+    .download svg { width: 16px; height: 16px; }
+    .canvas-wrap { position: relative; height: 290px; }
+    .empty { grid-column: 1 / -1; min-height: 260px; display: grid; place-items: center; padding: 28px; border: 1px dashed var(--line); border-radius: 5px; background: rgba(255,255,255,.7); color: var(--muted); text-align: center; }
+    .empty strong { display: block; margin-bottom: 6px; color: var(--ink); font: 500 20px "Fraunces", Georgia, serif; }
+    .footer { margin-top: 28px; padding-top: 13px; border-top: 1px solid var(--line); color: var(--muted); font: 400 10px "DM Mono", monospace; }
+    .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+    @media (max-width: 850px) {
+      .upload-row { grid-template-columns: 1fr; }
+      .status { min-width: 0; min-height: 42px; }
+      .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .metric:nth-child(2) { border-right: 0; }
+      .metric:nth-child(-n+2) { border-bottom: 1px solid var(--line); }
+    }
+    @media (max-width: 620px) {
+      .shell { padding-top: 20px; }
+      .masthead { display: block; }
+      .privacy { margin-top: 16px; }
+      .drop-zone { align-items: flex-start; flex-direction: column; }
+      .file-name { max-width: 100%; }
+      .date-controls { align-items: flex-start; }
+      .field input { width: 136px; }
+      .chart-grid { grid-template-columns: 1fr; }
+      .chart-panel.wide { grid-column: auto; }
+      .canvas-wrap { height: 250px; }
+      .section-head { display: block; }
+      .section-head p { margin-top: 5px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header class="masthead">
+      <div>
+        <p class="eyebrow">Estación meteorológica · Málaga</p>
+        <h1>Cártama</h1>
+        <p class="subtitle">Seguimiento diario de variables agroclimáticas</p>
+      </div>
+      <div class="privacy">PROCESAMIENTO LOCAL</div>
+    </header>
+
+    <section class="upload-row" aria-label="Cargar archivo">
+      <div class="drop-zone" id="dropZone" role="button" tabindex="0" aria-label="Seleccionar o soltar un archivo CSV o Excel">
+        <div class="drop-copy">
+          <span class="upload-mark" aria-hidden="true">↑</span>
+          <div>
+            <p class="drop-title">Suelta aquí el archivo completo</p>
+            <p class="drop-hint">CSV o Excel · se procesa en este navegador</p>
+          </div>
+        </div>
+        <span class="file-name" id="fileName">Aún no hay archivo</span>
+        <button class="button" id="browseButton" type="button">Abrir archivo</button>
+      </div>
+      <div class="status" id="status" role="status" aria-live="polite">Esperando archivo de datos.</div>
+      <input class="sr-only" id="fileInput" type="file" accept=".csv,.xlsx,.xls">
+    </section>
+
+    <section class="toolbar" aria-label="Filtros de fecha">
+      <div class="date-controls">
+        <div class="field"><label for="dateFrom">Desde</label><input id="dateFrom" type="date" disabled></div>
+        <div class="field"><label for="dateTo">Hasta</label><input id="dateTo" type="date" disabled></div>
+        <div class="presets" role="group" aria-label="Rangos rápidos">
+          <button class="preset active" data-range="2m" type="button" disabled>2 meses</button>
+          <button class="preset" data-range="year" type="button" disabled>Año</button>
+          <button class="preset" data-range="all" type="button" disabled>Todo</button>
+        </div>
+      </div>
+      <p class="range-label" id="rangeLabel">Carga el archivo para ver el periodo.</p>
+    </section>
+
+    <section class="metrics" aria-label="Resumen del periodo">
+      <article class="metric"><p class="metric-label">Última lectura</p><p class="metric-value" id="metricLatest">--</p></article>
+      <article class="metric"><p class="metric-label">Días con datos</p><p class="metric-value" id="metricDays">--</p></article>
+      <article class="metric"><p class="metric-label">Mínima del periodo</p><p class="metric-value" id="metricMin">--</p></article>
+      <article class="metric"><p class="metric-label">Lluvia acumulada</p><p class="metric-value" id="metricRain">--</p></article>
+    </section>
+
+    <section>
+      <div class="section-head">
+        <h2>Variables</h2>
+        <p id="variableCount">Los gráficos aparecerán al cargar datos.</p>
+      </div>
+      <div class="chart-grid" id="chartGrid">
+        <div class="empty"><div><strong>Esperando datos</strong>Arrastra el CSV o Excel completo para generar los gráficos.</div></div>
+      </div>
+    </section>
+
+    <footer class="footer" id="footer">CÁRTAMA · PANEL LOCAL</footer>
+  </main>
+
+  <script>
+    const knownGroups = [
+      { id: "temperature", title: "Temperatura", subtitle: "Máxima, media y mínima", columns: ["Ma09TMax", "Ma09TMed", "Ma09TMin"], colors: ["#c65e4b", "#d39a3c", "#517d91"], unit: "°C", wide: true },
+      { id: "humidity", title: "Humedad relativa", subtitle: "Máxima, media y mínima", columns: ["Ma09HumMax", "Ma09HumMed", "Ma09HumMin"], colors: ["#517d91", "#568b68", "#d39a3c"], unit: "%", wide: true },
+      { id: "precipitation", title: "Precipitación", subtitle: "Lluvia diaria", columns: ["Ma09Precip"], colors: ["#517d91"], unit: "mm", type: "bar" },
+      { id: "wind", title: "Velocidad del viento", subtitle: "Media y máxima diaria", columns: ["Ma09VelViento", "Ma09VelVientoMax"], colors: ["#568b68", "#c65e4b"], unit: "m/s" },
+      { id: "direction", title: "Dirección del viento", subtitle: "Grados · escala 0–360", columns: ["Ma09DirViento"], colors: ["#d39a3c"], unit: "°", min: 0, max: 360 },
+      { id: "radiation", title: "Radiación", subtitle: "Registro diario", columns: ["Ma09Rad"], colors: ["#d39a3c"], unit: "" },
+      { id: "eto", title: "Evapotranspiración de referencia", subtitle: "ETo diaria", columns: ["Ma09ETo"], colors: ["#568b68"], unit: "mm" }
+    ];
+    const fileInput = document.getElementById("fileInput");
+    const dropZone = document.getElementById("dropZone");
+    const statusBox = document.getElementById("status");
+    const charts = new Map();
+    let records = [];
+    let headers = [];
+    let activeFileName = "";
+    let dateColumn = "";
+    let measureColumns = [];
+
+    function setStatus(message, state = "") {
+      statusBox.textContent = message;
+      statusBox.dataset.state = state;
+    }
+
+    function normalizeHeader(value) {
+      return String(value ?? "").trim().toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    }
+
+    function parseDate(value) {
+      if (value instanceof Date && !Number.isNaN(value.getTime())) return new Date(value.getFullYear(), value.getMonth(), value.getDate());
+      if (typeof value === "number" && Number.isFinite(value) && value > 10000 && value < 100000 && window.XLSX) {
+        const parts = XLSX.SSF.parse_date_code(value);
+        if (parts) return new Date(parts.y, parts.m - 1, parts.d);
+      }
+      const text = String(value ?? "").trim();
+      let match = text.match(/^(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{2,4})$/);
+      if (match) {
+        let year = Number(match[3]);
+        if (year < 100) year += year >= 70 ? 1900 : 2000;
+        return new Date(year, Number(match[2]) - 1, Number(match[1]));
+      }
+      match = text.match(/^(\d{4})[/.\-](\d{1,2})[/.\-](\d{1,2})/);
+      if (match) return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+      const parsed = new Date(text);
+      return Number.isNaN(parsed.getTime()) ? null : new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
+    }
+
+    function parseNumber(value) {
+      if (typeof value === "number") return Number.isFinite(value) ? value : null;
+      if (value === null || value === undefined) return null;
+      let text = String(value).trim();
+      if (!text || ["--:--", "--", "NA", "N/A", "NULL"].includes(text.toUpperCase())) return null;
+      text = text.replace(/\s/g, "");
+      if (text.includes(",") && text.includes(".")) {
+        text = text.lastIndexOf(",") > text.lastIndexOf(".") ? text.replace(/\./g, "").replace(",", ".") : text.replace(/,/g, "");
+      } else if (text.includes(",")) {
+        text = text.replace(",", ".");
+      }
+      const number = Number(text);
+      return Number.isFinite(number) ? number : null;
+    }
+
+    function localISO(date) {
+      return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+    }
+
+    function displayDate(date) {
+      return new Intl.DateTimeFormat("es-ES", { day: "2-digit", month: "2-digit", year: "numeric" }).format(date);
+    }
+
+    function detectDelimiter(line) {
+      const options = [";", "\t", ","];
+      return options.sort((a, b) => line.split(b).length - line.split(a).length)[0];
+    }
+
+    async function readRows(file) {
+      const buffer = await file.arrayBuffer();
+      const isCsv = /\.csv$/i.test(file.name) || file.type.includes("csv");
+      const firstLine = new TextDecoder("utf-8").decode(buffer.slice(0, 4096)).split(/\r?\n/, 1)[0].replace(/^\uFEFF/, "");
+      const workbook = XLSX.read(buffer, { type: "array", FS: isCsv ? detectDelimiter(firstLine) : undefined, cellDates: true, raw: true });
+      const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+      return XLSX.utils.sheet_to_json(firstSheet, { header: 1, defval: null, raw: true, blankrows: false });
+    }
+
+    function setDateInputsEnabled(enabled) {
+      document.querySelectorAll("#dateFrom, #dateTo, .preset").forEach(element => { element.disabled = !enabled; });
+    }
+
+    function getFilteredRows() {
+      const from = document.getElementById("dateFrom").value ? parseDate(document.getElementById("dateFrom").value) : null;
+      const to = document.getElementById("dateTo").value ? parseDate(document.getElementById("dateTo").value) : null;
+      return records.filter(row => (!from || row._date >= from) && (!to || row._date <= to));
+    }
+
+    function describeColumn(column) {
+      const labels = {
+        Ma09TMax: "Temperatura máxima", Ma09TMed: "Temperatura media", Ma09TMin: "Temperatura mínima",
+        Ma09HumMax: "Humedad máxima", Ma09HumMed: "Humedad media", Ma09HumMin: "Humedad mínima",
+        Ma09Precip: "Precipitación", Ma09VelViento: "Viento medio", Ma09VelVientoMax: "Viento máximo",
+        Ma09DirViento: "Dirección del viento", Ma09Rad: "Radiación", Ma09ETo: "ETo"
+      };
+      return labels[column] || column;
+    }
+
+    function chartGroups() {
+      const assigned = new Set();
+      const groups = knownGroups.filter(group => group.columns.some(column => measureColumns.includes(column))).map(group => {
+        const present = group.columns.filter(column => measureColumns.includes(column));
+        present.forEach(column => assigned.add(column));
+        return { ...group, columns: present, colors: present.map(column => group.colors[group.columns.indexOf(column)]) };
+      });
+      measureColumns.filter(column => !assigned.has(column)).forEach((column, index) => {
+        groups.push({ id: `other-${index}`, title: describeColumn(column), subtitle: column, columns: [column], colors: ["#245c4b"], unit: "" });
+      });
+      return groups;
+    }
+
+    function createChart(group, rows) {
+      const canvas = document.getElementById(`canvas-${group.id}`);
+      if (!canvas) return;
+      const labels = rows.map(row => displayDate(row._date));
+      const datasets = group.columns.map((column, index) => ({
+        label: describeColumn(column),
+        data: rows.map(row => row[column]),
+        borderColor: group.colors[index],
+        backgroundColor: group.type === "bar" ? `${group.colors[index]}99` : `${group.colors[index]}18`,
+        borderWidth: group.type === "bar" ? 0 : 2,
+        pointRadius: rows.length < 100 ? 2 : 0,
+        pointHoverRadius: 4,
+        tension: 0.2,
+        spanGaps: true,
+        fill: false,
+        ...(group.type === "bar" ? { barPercentage: 0.78, categoryPercentage: 0.88 } : {})
+      }));
+      charts.set(group.id, new Chart(canvas, {
+        type: group.type || "line",
+        data: { labels, datasets },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          animation: false,
+          interaction: { mode: "index", intersect: false },
+          plugins: {
+            legend: { display: datasets.length > 1, position: "bottom", labels: { usePointStyle: true, boxWidth: 7, boxHeight: 7, padding: 16, color: "#64736e", font: { family: "DM Sans", size: 11 } } },
+            tooltip: { callbacks: { label: context => `${context.dataset.label}: ${context.parsed.y == null ? "sin dato" : `${context.parsed.y.toLocaleString("es-ES", { maximumFractionDigits: 2 })}${group.unit ? ` ${group.unit}` : ""}`}` } }
+          },
+          scales: {
+            x: { grid: { display: false }, ticks: { maxTicksLimit: 8, maxRotation: 0, color: "#73817b", font: { family: "DM Mono", size: 10 } }, border: { color: "#dce3dc" } },
+            y: { min: group.min, max: group.max, title: { display: Boolean(group.unit), text: group.unit, color: "#64736e", font: { family: "DM Sans", size: 10 } }, grid: { color: "#edf0eb" }, ticks: { color: "#73817b", font: { family: "DM Mono", size: 10 } }, border: { display: false } }
+          }
+        }
+      }));
+    }
+
+    function downloadChart(id, title) {
+      const chart = charts.get(id);
+      if (!chart) return;
+      const link = document.createElement("a");
+      link.href = chart.toBase64Image("image/png", 1);
+      link.download = `cartama_${title.toLowerCase().replace(/[^a-z0-9]+/g, "_")}.png`;
+      link.click();
+    }
+
+    function render() {
+      const rows = getFilteredRows();
+      charts.forEach(chart => chart.destroy());
+      charts.clear();
+      const grid = document.getElementById("chartGrid");
+      const groups = chartGroups();
+      if (!rows.length) {
+        grid.innerHTML = '<div class="empty"><div><strong>Sin datos en este rango</strong>Amplía las fechas para ver observaciones.</div></div>';
+        updateMetrics(rows);
+        return;
+      }
+      grid.innerHTML = groups.map(group => `
+        <article class="chart-panel ${group.wide ? "wide" : ""}">
+          <header class="chart-head">
+            <div><h3>${group.title}</h3><p>${group.subtitle}</p></div>
+            <button class="download" type="button" title="Descargar gráfico PNG" aria-label="Descargar gráfico ${group.title} en PNG" data-download="${group.id}">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/></svg>
+            </button>
+          </header>
+          <div class="canvas-wrap"><canvas id="canvas-${group.id}" role="img" aria-label="${group.title}"></canvas></div>
+        </article>`).join("");
+      groups.forEach(group => createChart(group, rows));
+      grid.querySelectorAll("[data-download]").forEach(button => button.addEventListener("click", () => {
+        const group = groups.find(item => item.id === button.dataset.download);
+        downloadChart(group.id, group.title);
+      }));
+      document.getElementById("variableCount").textContent = `${groups.length} gráficos · ${measureColumns.length} variables detectadas`;
+      document.getElementById("rangeLabel").textContent = rows.length ? `${displayDate(rows[0]._date)} — ${displayDate(rows[rows.length - 1]._date)}` : "";
+      updateMetrics(rows);
+    }
+
+    function updateMetrics(rows) {
+      const latest = rows.length ? rows[rows.length - 1]._date : null;
+      document.getElementById("metricLatest").textContent = latest ? displayDate(latest) : "--";
+      document.getElementById("metricDays").textContent = rows.length ? rows.length.toLocaleString("es-ES") : "--";
+      const temperatures = rows.map(row => row.Ma09TMin).filter(Number.isFinite);
+      const rain = rows.map(row => row.Ma09Precip).filter(Number.isFinite);
+      document.getElementById("metricMin").innerHTML = temperatures.length ? `${Math.min(...temperatures).toLocaleString("es-ES", { maximumFractionDigits: 1 })}<small> °C</small>` : "--";
+      document.getElementById("metricRain").innerHTML = rain.length ? `${rain.reduce((sum, value) => sum + value, 0).toLocaleString("es-ES", { maximumFractionDigits: 1 })}<small> mm</small>` : "--";
+    }
+
+    function setRange(mode) {
+      if (!records.length) return;
+      const first = records[0]._date;
+      const last = records[records.length - 1]._date;
+      let from = first;
+      if (mode === "2m") {
+        from = new Date(last.getFullYear(), last.getMonth() - 2, last.getDate());
+      } else if (mode === "year") {
+        from = new Date(last.getFullYear(), 0, 1);
+      }
+      document.getElementById("dateFrom").value = localISO(from);
+      document.getElementById("dateTo").value = localISO(last);
+      document.querySelectorAll(".preset").forEach(button => button.classList.toggle("active", button.dataset.range === mode));
+      render();
+    }
+
+    async function loadFile(file) {
+      if (!file) return;
+      if (!window.XLSX || !window.Chart) {
+        setStatus("No se pudieron cargar las librerías. Comprueba la conexión e inténtalo de nuevo.", "error");
+        return;
+      }
+      setStatus("Leyendo archivo…");
+      try {
+        const matrix = await readRows(file);
+        if (matrix.length < 2) throw new Error("El archivo no contiene filas de datos.");
+        headers = matrix[0].map(value => String(value ?? "").trim());
+        const dateIndex = headers.findIndex(header => normalizeHeader(header) === "FECHA" || normalizeHeader(header) === "DATE");
+        if (dateIndex < 0) throw new Error("No encuentro la columna FECHA.");
+        dateColumn = headers[dateIndex];
+        const rawRows = matrix.slice(1).filter(row => row.some(value => value !== null && value !== ""));
+        records = rawRows.map(row => {
+          const parsed = { _date: parseDate(row[dateIndex]) };
+          headers.forEach((header, index) => {
+            if (index !== dateIndex) parsed[header] = parseNumber(row[index]);
+          });
+          return parsed;
+        }).filter(row => row._date instanceof Date && !Number.isNaN(row._date.getTime())).sort((a, b) => a._date - b._date);
+        if (!records.length) throw new Error("No hay fechas válidas en la columna FECHA.");
+        measureColumns = headers.filter(header => {
+          const normalized = normalizeHeader(header);
+          if (normalized === "FECHA" || normalized === "DATE" || normalized === "DIA" || /^MA09HT/.test(normalized)) return false;
+          return records.some(row => Number.isFinite(row[header]));
+        });
+        activeFileName = file.name;
+        document.getElementById("fileName").textContent = activeFileName;
+        document.getElementById("footer").textContent = `CÁRTAMA · ${activeFileName} · ${records.length.toLocaleString("es-ES")} REGISTROS`;
+        setDateInputsEnabled(true);
+        setStatus(`${records.length.toLocaleString("es-ES")} observaciones cargadas.`, "ready");
+        setRange("2m");
+      } catch (error) {
+        records = [];
+        measureColumns = [];
+        setDateInputsEnabled(false);
+        setStatus(error instanceof Error ? error.message : "No se pudo leer el archivo.", "error");
+        document.getElementById("fileName").textContent = "Archivo no válido";
+        document.getElementById("chartGrid").innerHTML = '<div class="empty"><div><strong>No se pudieron cargar los datos</strong>Revisa que sea el archivo completo de Cártama.</div></div>';
+      }
+    }
+
+    document.getElementById("browseButton").addEventListener("click", event => {
+      event.stopPropagation();
+      fileInput.click();
+    });
+    dropZone.addEventListener("click", event => {
+      if (event.target.closest("button")) return;
+      fileInput.click();
+    });
+    dropZone.addEventListener("keydown", event => {
+      if (event.key === "Enter" || event.key === " ") { event.preventDefault(); fileInput.click(); }
+    });
+    fileInput.addEventListener("change", event => loadFile(event.target.files[0]));
+    ["dragenter", "dragover"].forEach(type => dropZone.addEventListener(type, event => {
+      event.preventDefault();
+      dropZone.classList.add("is-over");
+    }));
+    ["dragleave", "drop"].forEach(type => dropZone.addEventListener(type, event => {
+      event.preventDefault();
+      dropZone.classList.remove("is-over");
+    }));
+    dropZone.addEventListener("drop", event => loadFile(event.dataTransfer.files[0]));
+    document.querySelectorAll(".preset").forEach(button => button.addEventListener("click", () => setRange(button.dataset.range)));
+    document.getElementById("dateFrom").addEventListener("change", () => {
+      document.querySelectorAll(".preset").forEach(button => button.classList.remove("active"));
+      render();
+    });
+    document.getElementById("dateTo").addEventListener("change", () => {
+      document.querySelectorAll(".preset").forEach(button => button.classList.remove("active"));
+      render();
+    });
+  </script>
+</body>
+</html>
