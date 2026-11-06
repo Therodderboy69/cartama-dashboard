@@ -172,6 +172,17 @@
     </section>
 
     <footer class="footer" id="footer">CÁRTAMA · PANEL LOCAL</footer>
+      <section>
+        <div class="section-head">
+          <h2>Análisis histórico de lluvia</h2>
+          <p>Usa todo el histórico, independientemente del filtro de fechas superior.</p>
+        </div>
+        <div class="chart-grid" id="analysisGrid">
+          <div class="empty"><div><strong>Esperando datos</strong>Estos análisis se calculan al cargar el CSV.</div></div>
+        </div>
+      </section>
+
+      <footer class="footer" id="footer">CÁRTAMA · PANEL LOCAL</footer>
   </main>
 
   <script>
@@ -188,6 +199,7 @@
     const dropZone = document.getElementById("dropZone");
     const statusBox = document.getElementById("status");
     const charts = new Map();
+    const analysisCharts = new Map();
     let records = [];
     let headers = [];
     let activeFileName = "";
@@ -329,8 +341,170 @@
       }));
     }
 
+    function aggregateRainfallByMonth(source) {
+      const months = new Map();
+      source.forEach(row => {
+        if (!(row._date instanceof Date) || !Number.isFinite(row._date.getTime())) return;
+        const year = row._date.getFullYear();
+        const month = row._date.getMonth() + 1;
+        const key = `${year}-${month}`;
+        if (!months.has(key)) months.set(key, { year, month, precipitation: 0, rainyDays: 0, days: 0 });
+        const totals = months.get(key);
+        if (Number.isFinite(row.Ma09Precip)) {
+          totals.precipitation += row.Ma09Precip;
+          totals.days += 1;
+          if (row.Ma09Precip >= 0.1) totals.rainyDays += 1;
+        }
+      });
+      return [...months.values()].sort((a, b) => a.year - b.year || a.month - b.month);
+    }
+
+    function median(values) {
+      const sorted = values.slice().sort((a, b) => a - b);
+      if (!sorted.length) return null;
+      const middle = Math.floor(sorted.length / 2);
+      return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
+    }
+
+    function hatchPattern(background, stroke) {
+      const tile = document.createElement("canvas");
+      tile.width = 10;
+      tile.height = 10;
+      const context = tile.getContext("2d");
+      context.fillStyle = background;
+      context.fillRect(0, 0, tile.width, tile.height);
+      context.strokeStyle = stroke;
+      context.lineWidth = 1.4;
+      context.beginPath();
+      context.moveTo(-2, 10);
+      context.lineTo(10, -2);
+      context.stroke();
+      return context.createPattern(tile, "repeat");
+    }
+
+    function analysisPanel(id, title, subtitle) {
+      return `<article class="chart-panel">
+        <header class="chart-head">
+          <div><h3>${title}</h3><p>${subtitle}</p></div>
+          <button class="download" type="button" title="Descargar gráfico PNG" aria-label="Descargar gráfico ${title} en PNG" data-analysis-download="${id}">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/></svg>
+          </button>
+        </header>
+        <div class="canvas-wrap"><canvas id="canvas-${id}" role="img" aria-label="${title}"></canvas></div>
+      </article>`;
+    }
+
+    function renderRainfallAnalysis(source) {
+      analysisCharts.forEach(chart => chart.destroy());
+      analysisCharts.clear();
+      const grid = document.getElementById("analysisGrid");
+      const monthly = aggregateRainfallByMonth(source);
+      if (!monthly.length || !source.some(row => Number.isFinite(row.Ma09Precip))) {
+        grid.innerHTML = '<div class="empty"><div><strong>Sin datos de precipitación</strong>Se necesita la columna Ma09Precip.</div></div>';
+        return;
+      }
+
+      const years = [...new Set(monthly.map(row => row.year))];
+      const currentYear = years[years.length - 1];
+      const coverage = new Map();
+      monthly.forEach(row => coverage.set(row.year, (coverage.get(row.year) || 0) + row.days));
+      const historicalYears = years.filter(year => year < currentYear && coverage.get(year) >= 330);
+      const wettestByYear = new Map();
+      [...historicalYears, currentYear].forEach(year => {
+        const yearMonths = monthly.filter(row => row.year === year);
+        if (!yearMonths.length) return;
+        const wettest = yearMonths.reduce((best, row) => row.precipitation > best.precipitation ? row : best, yearMonths[0]);
+        wettestByYear.set(year, wettest);
+      });
+
+      grid.innerHTML = [
+        analysisPanel("wettest-month", "Mes más lluvioso por año", "Histórico completo y año en curso provisional."),
+        analysisPanel("wettest-stats", "Lluvia y días del mes máximo", "Precipitación mensual y días con lluvia ≥ 0,1 mm."),
+        analysisPanel("efm-ond", "Lluvia EFM frente a OND", "Acumulados anuales; líneas de referencia = medianas históricas.")
+      ].join("");
+
+      const labels = years.map(String);
+      const monthNames = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
+      const historicalMonthData = years.map(year => historicalYears.includes(year) ? wettestByYear.get(year)?.month ?? null : null);
+      const currentWettest = wettestByYear.get(currentYear);
+      const partialMonthData = years.map(year => year === currentYear ? currentWettest?.month ?? null : null);
+      const monthChart = new Chart(document.getElementById("canvas-wettest-month"), {
+        type: "line",
+        data: { labels, datasets: [
+          { label: "Histórico completo", data: historicalMonthData, borderColor: "#347eaa", backgroundColor: "#347eaa", borderWidth: 2, pointRadius: 3, pointHoverRadius: 5, spanGaps: true, tension: 0 },
+          { label: `${currentYear} parcial`, data: partialMonthData, borderColor: "#d97732", backgroundColor: "#d97732", showLine: false, pointStyle: "star", pointRadius: 7, pointHoverRadius: 9 }
+        ] },
+        options: {
+          responsive: true, maintainAspectRatio: false, animation: false,
+          interaction: { mode: "index", intersect: false },
+          plugins: { legend: { position: "bottom", labels: { usePointStyle: true, boxWidth: 7, padding: 14, color: "#64736e", font: { family: "DM Sans", size: 11 } } } },
+          scales: {
+            x: { grid: { display: false }, ticks: { maxTicksLimit: 10, maxRotation: 0, color: "#73817b", font: { family: "DM Mono", size: 10 } } },
+            y: { min: 1, max: 12, ticks: { stepSize: 1, callback: value => monthNames[value - 1] || "", color: "#73817b", font: { family: "DM Sans", size: 10 } }, title: { display: true, text: "Mes más lluvioso" }, grid: { color: "#edf0eb" } }
+          }
+        }
+      });
+      analysisCharts.set("wettest-month", monthChart);
+
+      const wettestPrecipitation = years.map(year => wettestByYear.get(year)?.precipitation ?? null);
+      const wettestRainyDays = years.map(year => wettestByYear.get(year)?.rainyDays ?? null);
+      const currentIndex = years.indexOf(currentYear);
+      const statsChart = new Chart(document.getElementById("canvas-wettest-stats"), {
+        type: "bar",
+        data: { labels, datasets: [
+          { label: "Lluvia del mes máximo (mm)", data: wettestPrecipitation, backgroundColor: context => context.dataIndex === currentIndex ? "#e17b35" : "#6fa5c7", borderWidth: 0 },
+          { type: "line", label: "Días con lluvia", data: wettestRainyDays, yAxisID: "yDays", borderColor: "#d94c43", backgroundColor: "#d94c43", borderWidth: 2, pointRadius: context => context.dataIndex === currentIndex ? 6 : 3, pointStyle: context => context.dataIndex === currentIndex ? "star" : "circle", spanGaps: true, tension: 0 }
+        ] },
+        options: {
+          responsive: true, maintainAspectRatio: false, animation: false,
+          interaction: { mode: "index", intersect: false },
+          plugins: { legend: { position: "bottom", labels: { usePointStyle: true, boxWidth: 7, padding: 12, color: "#64736e", font: { family: "DM Sans", size: 10 } } } },
+          scales: {
+            x: { grid: { display: false }, ticks: { maxTicksLimit: 10, maxRotation: 0, color: "#73817b", font: { family: "DM Mono", size: 10 } } },
+            y: { beginAtZero: true, title: { display: true, text: "Precipitación (mm)" }, grid: { color: "#edf0eb" } },
+            yDays: { beginAtZero: true, position: "right", title: { display: true, text: "Días" }, grid: { drawOnChartArea: false } }
+          }
+        }
+      });
+      analysisCharts.set("wettest-stats", statsChart);
+
+      const seasonal = new Map(years.map(year => [year, { efm: null, ond: null }]));
+      monthly.forEach(row => {
+        const values = seasonal.get(row.year);
+        if (row.month >= 1 && row.month <= 3) values.efm = (values.efm ?? 0) + row.precipitation;
+        if (row.month >= 10 && row.month <= 12) values.ond = (values.ond ?? 0) + row.precipitation;
+      });
+      const efmMedian = median(years.filter(year => year < currentYear).map(year => seasonal.get(year).efm).filter(Number.isFinite));
+      const ondMedian = median(years.filter(year => year < currentYear).map(year => seasonal.get(year).ond).filter(Number.isFinite));
+      const efmPattern = hatchPattern("rgba(52, 126, 170, 0.2)", "rgba(52, 126, 170, 0.9)");
+      const ondPattern = hatchPattern("rgba(225, 123, 53, 0.2)", "rgba(225, 123, 53, 0.9)");
+      const seasonalDatasets = [
+        { label: "EFM (Ene-Feb-Mar)", data: years.map(year => seasonal.get(year).efm ?? 0), backgroundColor: context => years[context.dataIndex] === currentYear ? efmPattern : "#347eaa", borderWidth: 0, barPercentage: 0.75, categoryPercentage: 0.8 },
+        { label: "OND (Oct-Nov-Dic)", data: years.map(year => seasonal.get(year).ond ?? 0), backgroundColor: context => years[context.dataIndex] === currentYear ? ondPattern : "#ed812c", borderWidth: 0, barPercentage: 0.75, categoryPercentage: 0.8 }
+      ];
+      if (efmMedian !== null) seasonalDatasets.push({ type: "line", label: `EFM típico (mediana: ${efmMedian.toLocaleString("es-ES", { maximumFractionDigits: 1 })} mm)`, data: years.map(() => efmMedian), borderColor: "#347eaa", borderDash: [7, 5], pointRadius: 0, borderWidth: 2, order: 0 });
+      if (ondMedian !== null) seasonalDatasets.push({ type: "line", label: `OND típico (mediana: ${ondMedian.toLocaleString("es-ES", { maximumFractionDigits: 1 })} mm)`, data: years.map(() => ondMedian), borderColor: "#ed812c", borderDash: [2, 4], pointRadius: 0, borderWidth: 2, order: 0 });
+      const seasonalChart = new Chart(document.getElementById("canvas-efm-ond"), {
+        type: "bar",
+        data: { labels, datasets: seasonalDatasets },
+        options: {
+          responsive: true, maintainAspectRatio: false, animation: false,
+          interaction: { mode: "index", intersect: false },
+          plugins: { legend: { position: "bottom", labels: { usePointStyle: true, boxWidth: 7, padding: 11, color: "#64736e", font: { family: "DM Sans", size: 10 } } } },
+          scales: {
+            x: { grid: { display: false }, ticks: { maxTicksLimit: 12, maxRotation: 45, color: "#73817b", font: { family: "DM Mono", size: 9 } } },
+            y: { beginAtZero: true, title: { display: true, text: "Precipitación acumulada (mm)" }, grid: { color: "#edf0eb" } }
+          }
+        }
+      });
+      analysisCharts.set("efm-ond", seasonalChart);
+      grid.querySelectorAll("[data-analysis-download]").forEach(button => button.addEventListener("click", () => {
+        downloadChart(button.dataset.analysisDownload, button.getAttribute("aria-label").replace("Descargar gráfico ", "").replace(" en PNG", ""));
+      }));
+    }
+
     function downloadChart(id, title) {
-      const chart = charts.get(id);
+      const chart = charts.get(id) || analysisCharts.get(id);
       if (!chart) return;
       const link = document.createElement("a");
       link.href = chart.toBase64Image("image/png", 1);
@@ -340,6 +514,7 @@
 
     function render() {
       const rows = getFilteredRows();
+      renderRainfallAnalysis(records);
       charts.forEach(chart => chart.destroy());
       charts.clear();
       const grid = document.getElementById("chartGrid");
